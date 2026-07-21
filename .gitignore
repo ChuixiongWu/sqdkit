@@ -24,5 +24,8 @@ htmlcov/
 *_result.npz
 *_result.json
 
+# Playground / demo workspace
+workdir/
+
 # OpenCode planning artifacts
 .omo/
