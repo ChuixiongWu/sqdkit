@@ -1,0 +1,86 @@
+"""ffsim-backed local unitary cluster Jastrow state preparation."""
+
+from __future__ import annotations
+
+import ffsim
+import numpy as np
+from qiskit import QuantumCircuit
+from qiskit.providers.fake_provider import GenericBackendV2
+from qiskit.transpiler import PassManager, Target
+
+from sqdkit.problem import ProblemData
+from sqdkit.stateprep import StatePrepResult
+from sqdkit.targets import BackendProfile
+
+
+class LucjStatePrep:
+    """Build LUCJ circuits and their ffsim-specific compilation passes."""
+
+    def __init__(
+        self,
+        n_reps: int = 2,
+        interaction_pairs: tuple[
+            list[tuple[int, int]] | None, list[tuple[int, int]] | None
+        ] = (None, None),
+    ) -> None:
+        self.n_reps = n_reps
+        self.interaction_pairs = interaction_pairs
+        self._norb: int | None = None
+
+    def build(
+        self, problem: ProblemData, target: Target | None = None
+    ) -> StatePrepResult:
+        """Construct the Hartree--Fock reference followed by the LUCJ ansatz."""
+        del target
+        t2 = np.array(problem.provenance["t2"])
+        raw_t1 = problem.provenance.get("t1")
+        t1 = None if raw_t1 is None else np.array(raw_t1)
+        ucj_op = ffsim.UCJOpSpinBalanced.from_t_amplitudes(
+            t2,
+            t1=t1,
+            n_reps=self.n_reps,
+            interaction_pairs=self.interaction_pairs,
+        )
+        circuit = QuantumCircuit(2 * problem.norb)
+        circuit.append(
+            ffsim.qiskit.PrepareHartreeFockJW(
+                problem.norb, (problem.n_alpha, problem.n_beta)
+            ),
+            range(2 * problem.norb),
+        )
+        circuit.append(
+            ffsim.qiskit.UCJOpSpinBalancedJW(ucj_op), range(2 * problem.norb)
+        )
+        self._norb = problem.norb
+        return StatePrepResult(circuit, norb=problem.norb, metadata={"method": "lucj"})
+
+    def pass_manager(self, profile: BackendProfile) -> PassManager | None:
+        """Build ffsim's LUCJ-aware pass manager after circuit construction."""
+        if self._norb is None:
+            raise RuntimeError("build() must be called before pass_manager()")
+        if profile.mode in {"ideal", "synthetic_noise"}:
+            return None
+        same_spin_pairs = self.interaction_pairs[0]
+        if same_spin_pairs is None:
+            same_spin_pairs = [
+                (first, second)
+                for first in range(self._norb)
+                for second in range(first + 1, self._norb)
+            ]
+        backend = profile.build_simulator()
+        if profile.mode == "topology":
+            backend = GenericBackendV2(
+                max(max(edge) for edge in profile.coupling_map) + 1,
+                profile.basis_gates,
+                coupling_map=profile.coupling_map,
+                seed=profile.seed,
+                noise_info=False,
+            )
+        pass_manager, _ = ffsim.qiskit.generate_lucj_pass_manager(
+            backend=backend,
+            norb=self._norb,
+            connectivity="square",
+            interaction_pairs=(same_spin_pairs, self.interaction_pairs[1]),
+            optimization_level=1,
+        )
+        return pass_manager

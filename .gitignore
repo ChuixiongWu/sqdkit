@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# venv
+.venv/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# SQD result artifacts (generated, not source)
+*_result.npz
+*_result.json
+
+# OpenCode planning artifacts
+.omo/
