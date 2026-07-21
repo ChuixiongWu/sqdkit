@@ -22,6 +22,31 @@ class StatePrepResult:
     norb: int
     metadata: dict[str, str]
 
+    def plot(self, fmt: str = "text", path: str | None = None) -> None:
+        """Draw the state-preparation circuit.
+
+        Parameters
+        ----------
+        fmt : str
+            ``"text"`` prints ASCII art to stdout.
+            ``"png"`` saves a matplotlib rendering to *path*.
+        path : str or None
+            Output file path (required when ``fmt="png"``).
+        """
+        if fmt not in {"text", "png"}:
+            raise ValueError(f"unknown format {fmt!r}; expected 'text' or 'png'")
+
+        if fmt == "text":
+            from sqdkit.viz._circuit import circuit_to_text
+
+            print(circuit_to_text(self.circuit))
+        else:
+            if path is None:
+                raise ValueError("path is required for png format")
+            from sqdkit.viz._circuit import circuit_to_png
+
+            circuit_to_png(self.circuit, path)
+
 
 @runtime_checkable
 class StatePrep(Protocol):

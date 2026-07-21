@@ -19,6 +19,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "matplotlib>=3.11.1",
+    "pylatexenc>=2.10",
     "pytest",
     "pytest-timeout",
     "ruff",

@@ -2,8 +2,12 @@
 
 Research-oriented sample-based quantum diagonalization (SQD) framework.
 
+[中文版 (Chinese)](README.zh.md)
+
 For the implementation details and project architecture, see
 [`docs/implementation-plan.md`](docs/implementation-plan.md).
+API reference: [`docs/api.md`](docs/api.md).
+LUCJ design notes: [`docs/lucj-design-notes.md`](docs/lucj-design-notes.md).
 
 ## Environment (from project metadata)
 
