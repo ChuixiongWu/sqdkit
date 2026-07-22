@@ -27,5 +27,8 @@ htmlcov/
 # Playground / demo workspace
 workdir/
 
+# Packaged exploration archives
+explores/
+
 # OpenCode planning artifacts
 .omo/

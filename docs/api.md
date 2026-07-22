@@ -165,6 +165,33 @@ Less-common SQD diagonalization controls, passed through directly to
 
 ---
 
+## Conventions
+
+### Qubit ordering
+
+The framework uses a fixed convention to bridge Qiskit/ffsim circuits
+and SQD post-processing:
+
+| Layer | Convention |
+|-------|-----------|
+| Circuit (ffsim) | qubits ``[0, norb)`` = alpha, ``[norb, 2*norb)`` = beta |
+| Qiskit samples | little-endian: column ``i`` = qubit ``i`` (alpha first, then beta) |
+| SQD input (`qiskit-addon-sqd`) | ``[beta₀ … beta_{norb-1}, alpha₀ … alpha_{norb-1}]`` |
+
+``sqdkit.stateprep.to_sqd_bit_array(bit_array, norb)`` performs the conversion
+from Qiskit samples to SQD input layout in one call.
+
+**If you write a custom ``StatePrep`` that uses a different qubit layout,**
+you must either (a) ensure ``build()`` produces a circuit compatible with the
+convention above, or (b) provide your own conversion to the SQD ``[beta…, alpha…]``
+format before calling ``diagonalize_fermionic_hamiltonian``.
+
+The conversion is trivial when the circuit respects spin blocks —
+just split at ``norb`` and swap the halves.  See the source of
+``to_sqd_bit_array`` for the one-line implementation.
+
+---
+
 ## Internal pipeline (for customisation)
 
 These functions are called internally by `sqd_runner.run()`. You only need them

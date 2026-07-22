@@ -153,6 +153,31 @@ profile = BackendProfile.calibration_like("FakeSherbrooke")
 
 ---
 
+## 约定
+
+### 量子比特顺序
+
+框架使用固定约定来桥接 Qiskit/ffsim 线路和 SQD 后处理：
+
+| 层级 | 约定 |
+|------|------|
+| 线路（ffsim） | qubits ``[0, norb)`` = alpha, ``[norb, 2*norb)`` = beta |
+| Qiskit 采样 | little-endian: 列 ``i`` = qubit ``i``（alpha 在前，beta 在后） |
+| SQD 输入（`qiskit-addon-sqd`） | ``[beta₀ … beta_{norb-1}, alpha₀ … alpha_{norb-1}]`` |
+
+``sqdkit.stateprep.to_sqd_bit_array(bit_array, norb)`` 一行即可完成从 Qiskit
+采样到 SQD 输入格式的转换。
+
+**如果你编写自定义 ``StatePrep`` 且使用不同的 qubit 布局，**
+必须满足以下条件之一：(a) 确保 ``build()`` 产生的线路遵循上述约定；
+或 (b) 在调用 ``diagonalize_fermionic_hamiltonian`` 之前，
+自行将采样结果转换为 SQD 要求的 ``[beta…, alpha…]`` 格式。
+
+当线路按自旋块组织时，转换很简单——在 ``norb`` 处切片并交换两半。
+参见 ``to_sqd_bit_array`` 的源码（仅一行实现）。
+
+---
+
 ## 内部管线（用于自定义）
 
 以下函数由 `sqd_runner.run()` 内部调用。仅在编写自定义工作流、自定义态制备方法或进行调试时才需要它们。
