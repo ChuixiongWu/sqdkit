@@ -49,7 +49,27 @@ string (e.g. `"sto-3g"`, `"6-31g"`).
   `mo_occ` (length-`nmo` occupations) and the normalized `geometry` (list of
   `[symbol, [x, y, z]]` in Angstrom), all persisted pickle-free across
   `save_npz`/`load_npz` so an AO back-transform is possible from a saved artifact.
-- Currently RHF only. UHF/ROHF support is not in v0 scope.
+  For open-shell problems the CCSD amplitudes are stored per spin as nested
+  lists (`t1 == [t1a, t1b]`, `t2 == [t2aa, t2ab, t2bb]`).
+
+### Open-shell (ROHF) references
+
+`build_problem(..., spin=2, ...)` works for open-shell molecules: PySCF's
+`scf.RHF(mol)` silently returns an **ROHF** object when `mol.spin != 0`, and
+the single `(nao, nmo)` ROHF `mo_coeff` keeps the integral transform
+unchanged. `cc.CCSD` on that reference converts it to UHF and returns a
+**UCCSD** (the "RCCSD method does not support ROHF" warning is expected and
+correct), so `provenance["t1"]`/`provenance["t2"]` are then **nested lists**
+of the per-spin components — the exact shape the spin-unbalanced LUCJ branch
+consumes:
+
+- `provenance["t1"] == [t1a, t1b]` (alpha, beta singles)
+- `provenance["t2"] == [t2aa, t2ab, t2bb]` (alpha-alpha, alpha-beta,
+  beta-beta doubles)
+
+The frozen-core energy/embedding is driven by the per-orbital occupations
+(`mo_occ` = 2.0 / 1.0 / 0.0), so a singly occupied frozen orbital contributes
+one electron. The closed-shell path is unchanged (bitwise identical).
 
 Examples:
 ```python
@@ -180,7 +200,7 @@ and SQD post-processing:
 |-------|-----------|
 | Circuit (ffsim) | qubits ``[0, norb)`` = alpha, ``[norb, 2*norb)`` = beta |
 | Qiskit samples | little-endian: column ``i`` = qubit ``i`` (alpha first, then beta) |
-| SQD input (`qiskit-addon-sqd`) | ``[beta₀ … beta_{norb-1}, alpha₀ … alpha_{norb-1}]`` |
+| SQD input (`qiskit-addon-sqd`) | ``[beta₀ … beta_{norb-1}, alpha₀ … alpha_{norb-1}]``, columns within each spin block reversed (column ``j`` = orbital ``norb-1-j``) |
 
 ``sqdkit.stateprep.to_sqd_bit_array(bit_array, norb)`` performs the conversion
 from Qiskit samples to SQD input layout in one call.
@@ -191,8 +211,8 @@ convention above, or (b) provide your own conversion to the SQD ``[beta…, alph
 format before calling ``diagonalize_fermionic_hamiltonian``.
 
 The conversion is trivial when the circuit respects spin blocks —
-just split at ``norb`` and swap the halves.  See the source of
-``to_sqd_bit_array`` for the one-line implementation.
+split at ``norb``, swap the halves, and reverse the columns of each half.
+See the source of ``to_sqd_bit_array`` for the implementation.
 
 ---
 
@@ -231,8 +251,18 @@ Returned by `StatePrep.build()`.
 ### `sqdkit.stateprep.to_sqd_bit_array(bit_array, norb) → np.ndarray`
 
 Convert Qiskit's spin-blocked bitstrings (alpha[0:norb), beta[norb:2norb)) to
-SQD's expected `[beta..., alpha...]` ordering. This is correctness-critical —
-a wrong convention produces physically wrong but plausible-looking energies.
+SQD's expected `[beta..., alpha...]` ordering, with the columns of each spin
+block reversed.  This is correctness-critical — a wrong convention produces
+physically wrong but plausible-looking energies.
+
+The intra-block reversal matches upstream `qiskit_addon_sqd`:
+`bitstring_matrix_to_integers` builds the CI integer most-significant-bit
+first (column 0 of each half contributes `1 << (norb - 1)`), while PySCF's
+`kernel_fixed_space` strings are least-significant-bit-first (bit 0 =
+orbital 0), so column `j` of a block maps onto orbital `norb - 1 - j`.  H2
+(norb=2) is invariant under this reversal; open-shell systems with norb > 2
+were silently mapped to the orbital-mirrored determinants before the fix
+(SQD total energies appeared above the reference by ~1.8 Ha on NH sto-3g).
 
 ### `sqdkit.synthesis.transpile_to_target(circuit, profile, pass_manager=None, seed=None) → (QuantumCircuit, dict)`
 
@@ -281,9 +311,18 @@ Complete result of one SQD run. Key fields: `total_energy`, `electronic_energy`,
 `core_energy`, `converged`, `iterations`, `subspace_summary`, `shots_total`,
 `stateprep_summary`, `compiled_summary`, `backend_profile_fingerprint`.
 
+Density data surfaced from upstream's `SCIResult` (active-space MO basis,
+alpha+beta summed):
+- `rdm1` — spin-summed 1-RDM, shape `(norb, norb)`, `trace == n_alpha + n_beta`
+- `rdm2` — spin-summed 2-RDM (when upstream returns one)
+- `orbital_occupancies` — per-spin orbital populations, shape `(2, norb)`
+
 Methods:
-- `save(path)` → NPZ (energies) + JSON (metadata sidecar)
+- `save(path)` → NPZ (energies + density arrays) + JSON (metadata sidecar)
 - `SQDResult.load(path)` → reload with `allow_pickle=False`
+
+The new density fields are optional and backward-compatible: artifacts saved
+before they existed load without them.
 
 ### `sqdkit.results.RunMetadata`
 
