@@ -67,13 +67,27 @@ def to_sqd_bit_array(bit_array: BitArray, norb: int) -> np.ndarray:
     Qiskit columns in little-endian order map directly to qubit indices.  The
     circuit convention is ``alpha[0:norb),beta[norb:2norb)``; SQD expects
     ``[beta...,alpha...]``.
+
+    The columns within each spin block are reversed: ``qiskit_addon_sqd``'s
+    ``bitstring_matrix_to_integers`` builds the CI integer most-significant-bit
+    first (column 0 of each half contributes ``1 << (norb - 1)``), while
+    PySCF's ``kernel_fixed_space`` strings are least-significant-bit-first
+    (bit 0 = orbital 0).  Reversing each block maps column ``j`` of a block
+    onto orbital ``norb - 1 - j``.  H2 (norb=2) is invariant under this
+    reversal, which is why closed-shell results are unchanged; for open-shell
+    systems with norb > 2 the unreversed encoding silently mapped the sampled
+    determinants to their orbital mirror images.
     """
     if bit_array.num_bits != 2 * norb:
         msg = f"bit array width must equal 2*norb ({2 * norb})"
         raise ValueError(msg)
     qubit_ordered = bit_array.to_bool_array(order="little")
     return np.concatenate(
-        (qubit_ordered[..., norb:], qubit_ordered[..., :norb]), axis=-1
+        (
+            qubit_ordered[..., norb:][..., ::-1],
+            qubit_ordered[..., :norb][..., ::-1],
+        ),
+        axis=-1,
     )
 
 
