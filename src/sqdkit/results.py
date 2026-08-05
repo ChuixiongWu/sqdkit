@@ -130,6 +130,32 @@ class SQDResult:
     seeds: dict
     elapsed_seconds: float
     metadata: RunMetadata | None = None
+    rdm1: np.ndarray | None = None
+    """Spin-summed 1-RDM in the active-space MO basis, shape ``(norb, norb)``.
+
+    Copied verbatim from the upstream ``SCIResult.rdm1`` (pyscf
+    ``make_rdm1`` on the converged SCI vector); its trace equals the active
+    electron count ``n_alpha + n_beta``. ``None`` on pre-extension artifacts.
+    """
+
+    rdm2: np.ndarray | None = None
+    """Spin-summed 2-RDM in the active-space MO basis, shape ``(norb,) * 4``.
+
+    Copied verbatim from the upstream ``SCIResult.rdm2``. Chosen over the
+    raw ``sci_state`` amplitudes/``ci_strs`` as the density-rebuild piece
+    because upstream already computed it (zero recompute) and every
+    rank-1/rank-2 density (spin-summed or spin-resolved, via diagonal
+    extraction) is recoverable from ``(rdm1, rdm2, orbital_occupancies)``.
+    ``None`` on pre-extension artifacts.
+    """
+
+    orbital_occupancies: np.ndarray | None = None
+    """Per-spin orbital populations, shape ``(2, norb)``; row 0 = alpha,
+    row 1 = beta (stacked from the upstream ``orbital_occupancies`` tuple).
+
+    Each entry lies in ``[0, 1]`` per spin; row sums equal ``n_alpha`` and
+    ``n_beta``. ``None`` on pre-extension artifacts.
+    """
 
     def __post_init__(self) -> None:
         if self.metadata is None:
@@ -146,16 +172,91 @@ class SQDResult:
             )
         else:
             self.metadata.validate()
+        self._validate_density_fields()
+
+    def _validate_density_fields(self) -> None:
+        rdm1 = self.rdm1
+        if rdm1 is not None:
+            rdm1 = np.asarray(rdm1, dtype=np.float64)
+            object.__setattr__(self, "rdm1", rdm1)
+            if rdm1.ndim != 2 or rdm1.shape[0] != rdm1.shape[1]:
+                raise ValueError("rdm1 must be a square 2D array")
+            norb = rdm1.shape[0]
+            if not np.allclose(rdm1, rdm1.T, rtol=0.0, atol=1e-8):
+                raise ValueError("rdm1 must be symmetric within 1e-8")
+            trace = float(np.trace(rdm1))
+            if not 0.0 - 1e-8 <= trace <= 2.0 * norb + 1e-8:
+                raise ValueError(
+                    "rdm1 trace must lie in [0, 2 * norb] for a 1-RDM"
+                )
+
+        rdm2 = self.rdm2
+        if rdm2 is not None:
+            rdm2 = np.asarray(rdm2, dtype=np.float64)
+            object.__setattr__(self, "rdm2", rdm2)
+            if (
+                rdm2.ndim != 4
+                or rdm2.shape[0] != rdm2.shape[1]
+                or rdm2.shape[1] != rdm2.shape[2]
+                or rdm2.shape[2] != rdm2.shape[3]
+            ):
+                raise ValueError("rdm2 must have shape (norb, norb, norb, norb)")
+
+        occupancies = self.orbital_occupancies
+        if occupancies is not None:
+            occupancies = np.asarray(occupancies, dtype=np.float64)
+            object.__setattr__(self, "orbital_occupancies", occupancies)
+            if occupancies.ndim != 2 or occupancies.shape[0] != 2:
+                raise ValueError(
+                    "orbital_occupancies must have shape (2, norb) "
+                    "(row 0 = alpha, row 1 = beta)"
+                )
+            if not np.all(occupancies >= -1e-8) or not np.all(
+                occupancies <= 1.0 + 1e-8
+            ):
+                raise ValueError(
+                    "orbital_occupancies must lie in [0, 1] within 1e-8"
+                )
+
+        if rdm1 is not None and occupancies is not None:
+            if occupancies.shape[1] != rdm1.shape[0]:
+                raise ValueError(
+                    "orbital_occupancies norb must match rdm1 norb"
+                )
+            expected_electrons = float(
+                occupancies[0].sum() + occupancies[1].sum()
+            )
+            if abs(float(np.trace(rdm1)) - expected_electrons) > 1e-6:
+                raise ValueError(
+                    "rdm1 must trace to the active electron count "
+                    f"(trace={float(np.trace(rdm1))}, expected={expected_electrons})"
+                )
 
     def save(self, path: str | Path) -> None:
         """Persist float64 energy scalars and a JSON-only metadata sidecar."""
         npz_path, json_path = _artifact_paths(path)
-        np.savez(
-            npz_path,
-            total_energy=np.array(self.total_energy, dtype=np.float64),
-            electronic_energy=np.array(self.electronic_energy, dtype=np.float64),
-            core_energy=np.array(self.core_energy, dtype=np.float64),
-        )
+        npz_fields = {
+            "total_energy": np.array(self.total_energy, dtype=np.float64),
+            "electronic_energy": np.array(self.electronic_energy, dtype=np.float64),
+            "core_energy": np.array(self.core_energy, dtype=np.float64),
+        }
+        if self.rdm1 is not None:
+            npz_fields["rdm1"] = np.asarray(self.rdm1, dtype=np.float64)
+        if self.rdm2 is not None:
+            npz_fields["rdm2"] = np.asarray(self.rdm2, dtype=np.float64)
+        if self.orbital_occupancies is not None:
+            npz_fields["orbital_occupancies"] = np.asarray(
+                self.orbital_occupancies, dtype=np.float64
+            )
+        np.savez(npz_path, **npz_fields)
+        occupancies_summary = None
+        if self.orbital_occupancies is not None:
+            occupancies_summary = {
+                "alpha_sum": float(self.orbital_occupancies[0].sum()),
+                "beta_sum": float(self.orbital_occupancies[1].sum()),
+                "min": float(self.orbital_occupancies.min()),
+                "max": float(self.orbital_occupancies.max()),
+            }
         json_path.write_text(
             json.dumps(
                 {
@@ -176,6 +277,22 @@ class SQDResult:
                     "seeds": self.seeds,
                     "elapsed_seconds": self.elapsed_seconds,
                     "metadata": asdict(self.metadata),
+                    "rdm1_shape": (
+                        None
+                        if self.rdm1 is None
+                        else [int(dim) for dim in self.rdm1.shape]
+                    ),
+                    "rdm2_shape": (
+                        None
+                        if self.rdm2 is None
+                        else [int(dim) for dim in self.rdm2.shape]
+                    ),
+                    "orbital_occupancies_shape": (
+                        None
+                        if self.orbital_occupancies is None
+                        else [int(dim) for dim in self.orbital_occupancies.shape]
+                    ),
+                    "orbital_occupancies_summary": occupancies_summary,
                 },
                 sort_keys=True,
             )
@@ -192,6 +309,13 @@ class SQDResult:
                     f"NPZ is missing required fields: {sorted(missing_fields)}"
                 )
             energies = {name: archive[name] for name in _RESULT_NPZ_FIELDS}
+            rdm1 = archive["rdm1"] if "rdm1" in archive.files else None
+            rdm2 = archive["rdm2"] if "rdm2" in archive.files else None
+            occupancies = (
+                archive["orbital_occupancies"]
+                if "orbital_occupancies" in archive.files
+                else None
+            )
 
         for name, value in energies.items():
             if value.shape != ():
@@ -229,4 +353,7 @@ class SQDResult:
             seeds=json_payload["seeds"],
             elapsed_seconds=float(json_payload["elapsed_seconds"]),
             metadata=RunMetadata(**metadata_payload),
+            rdm1=rdm1,
+            rdm2=rdm2,
+            orbital_occupancies=occupancies,
         )

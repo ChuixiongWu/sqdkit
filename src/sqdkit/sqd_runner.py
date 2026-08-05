@@ -123,6 +123,13 @@ def run(
         "num_qubits": stateprep_result.circuit.num_qubits,
         "depth": stateprep_result.circuit.depth(),
     }
+    # Surface the density data upstream already computed; stack the
+    # (alpha, beta) occupancy tuple into a (2, norb) array for persistence.
+    occupancies_stacked = (
+        np.stack(sci_result.orbital_occupancies)
+        if sci_result.orbital_occupancies is not None
+        else None
+    )
     return SQDResult(
         total_energy=float(sci_result.energy + problem.core_energy),
         electronic_energy=float(sci_result.energy),
@@ -147,4 +154,7 @@ def run(
             backend_profile_fingerprint=profile.fingerprint(),
             created_at=datetime.now(timezone.utc).isoformat(),
         ),
+        rdm1=sci_result.rdm1,
+        rdm2=sci_result.rdm2,
+        orbital_occupancies=occupancies_stacked,
     )
