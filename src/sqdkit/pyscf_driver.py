@@ -87,11 +87,20 @@ def build_problem(
         n_beta = sum(orbital < n_beta for orbital in selected_orbitals)
         norb = len(selected_orbitals)
 
-    provenance: dict[str, str | int | bool | list[int] | list[list[float]]] = {
+    geometry = [
+        [mol.atom_symbol(i), [float(x), float(y), float(z)]]
+        for i, (x, y, z) in enumerate(mol.atom_coords(unit="Angstrom"))
+    ]
+    provenance: dict[
+        str, str | int | bool | float | np.ndarray | list | dict
+    ] = {
         "source": "pyscf",
         "basis": basis,
         "charge": charge,
         "spin": spin,
+        "geometry": geometry,
+        "mo_coeff": np.asarray(c_matrix, dtype=np.float64),
+        "mo_occ": np.asarray(mf.mo_occ, dtype=np.float64),
         "active_space": selected_orbitals if selected_orbitals is not None else [],
         "with_ccsd": with_ccsd,
     }

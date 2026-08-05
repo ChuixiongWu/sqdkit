@@ -61,20 +61,33 @@ class ProblemData:
             raise ValueError("schema_version must be at least 1")
 
     def save_npz(self, path: str | Path) -> None:
-        """Write the v1 schema using only numeric and Unicode NumPy arrays."""
-        np.savez(
-            path,
-            h1=self.h1,
-            h2=self.h2,
-            core_energy=np.array(self.core_energy, dtype=np.float64),
-            norb=np.array(self.norb, dtype=np.int64),
-            n_alpha=np.array(self.n_alpha, dtype=np.int64),
-            n_beta=np.array(self.n_beta, dtype=np.int64),
-            integral_convention=np.array(self.integral_convention, dtype=str),
-            orbital_ordering=np.array(self.orbital_ordering, dtype=str),
-            schema_version=np.array(self.schema_version, dtype=np.int64),
-            metadata_json=np.array(json.dumps(self.provenance), dtype=str),
-        )
+        """Write the v1 schema using only numeric and Unicode NumPy arrays.
+
+        ``provenance["mo_coeff"]`` and ``provenance["mo_occ"]`` (when present)
+        are stored as plain float64 top-level arrays so the archive stays
+        readable with ``allow_pickle=False``; everything else in ``provenance``
+        (including the normalized geometry) is JSON inside ``metadata_json``.
+        """
+        provenance = dict(self.provenance)
+        mo_coeff = provenance.pop("mo_coeff", None)
+        mo_occ = provenance.pop("mo_occ", None)
+        fields: dict[str, np.ndarray] = {
+            "h1": self.h1,
+            "h2": self.h2,
+            "core_energy": np.array(self.core_energy, dtype=np.float64),
+            "norb": np.array(self.norb, dtype=np.int64),
+            "n_alpha": np.array(self.n_alpha, dtype=np.int64),
+            "n_beta": np.array(self.n_beta, dtype=np.int64),
+            "integral_convention": np.array(self.integral_convention, dtype=str),
+            "orbital_ordering": np.array(self.orbital_ordering, dtype=str),
+            "schema_version": np.array(self.schema_version, dtype=np.int64),
+            "metadata_json": np.array(json.dumps(provenance), dtype=str),
+        }
+        if mo_coeff is not None:
+            fields["mo_coeff"] = np.asarray(mo_coeff, dtype=np.float64)
+        if mo_occ is not None:
+            fields["mo_occ"] = np.asarray(mo_occ, dtype=np.float64)
+        np.savez(path, **fields)
 
     @classmethod
     def load_npz(cls, path: str | Path) -> ProblemData:
@@ -135,6 +148,11 @@ class ProblemData:
             provenance = json.loads(str(metadata_json.item()))
             if not isinstance(provenance, dict):
                 raise ValueError("metadata_json must encode a JSON object")
+            # Optional additive fields; absent in v1 artifacts, which must keep loading.
+            if "mo_coeff" in archive.files:
+                provenance["mo_coeff"] = archive["mo_coeff"]
+            if "mo_occ" in archive.files:
+                provenance["mo_occ"] = archive["mo_occ"]
 
             return cls(
                 h1=h1,

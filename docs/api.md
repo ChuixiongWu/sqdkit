@@ -45,6 +45,10 @@ string (e.g. `"sto-3g"`, `"6-31g"`).
   are restricted to those orbitals and frozen-core energy is added to `core_energy`.
 - If `with_ccsd=True` (default), CCSD t1/t2 amplitudes are computed and stored
   in `provenance` for state-preparation methods that need them (e.g. LUCJ).
+- `provenance` additionally records `mo_coeff` (full `(nao, nmo)` float array),
+  `mo_occ` (length-`nmo` occupations) and the normalized `geometry` (list of
+  `[symbol, [x, y, z]]` in Angstrom), all persisted pickle-free across
+  `save_npz`/`load_npz` so an AO back-transform is possible from a saved artifact.
 - Currently RHF only. UHF/ROHF support is not in v0 scope.
 
 Examples:
@@ -260,7 +264,7 @@ Chemistry problem: spatial-orbital integrals plus metadata.
 | `integral_convention` | `str` | Always `"chemist"` |
 | `orbital_ordering` | `str` | Convention string |
 | `schema_version` | `int` | Schema version (currently 1) |
-| `provenance` | `dict` | Source metadata (basis, geometry, t1/t2, ...) |
+| `provenance` | `dict` | Source metadata (basis, geometry, mo_coeff, mo_occ, t1/t2, ...) |
 
 Methods:
 - `save_npz(path)` — persist as NPZ (v1 schema, readable with `allow_pickle=False`)

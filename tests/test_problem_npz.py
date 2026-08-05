@@ -77,3 +77,25 @@ def test_load_raises_for_physicist_integral_convention(tmp_path):
     # When / Then
     with pytest.raises(ValueError, match="chemist"):
         ProblemData.load_npz(path)
+
+
+def test_load_npz_rejects_object_array_archive(tmp_path):
+    # Given: an NPZ whose metadata_json is an object array (pickle payload)
+    path = tmp_path / "object-array.npz"
+    np.savez(
+        path,
+        h1=np.eye(2, dtype=np.float64),
+        h2=np.zeros((2, 2, 2, 2), dtype=np.float64),
+        core_energy=np.array(0.0, dtype=np.float64),
+        norb=np.array(2, dtype=np.int64),
+        n_alpha=np.array(1, dtype=np.int64),
+        n_beta=np.array(1, dtype=np.int64),
+        integral_convention=np.array("chemist"),
+        orbital_ordering=np.array("spin_blocks:alpha[0:norb),beta[norb:2norb)"),
+        schema_version=np.array(1, dtype=np.int64),
+        metadata_json=np.array([{"provenance": np.float64(1.0)}], dtype=object),
+    )
+
+    # When / Then: load_npz opens with allow_pickle=False, so numpy refuses
+    with pytest.raises(ValueError):
+        ProblemData.load_npz(path)
