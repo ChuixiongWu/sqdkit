@@ -24,11 +24,12 @@ def build_problem(
     basis: str,
     charge: int = 0,
     spin: int = 0,
+    ecp: str | dict | None = None,
     active_space: list[int] | None = None,
     with_ccsd: bool = True,
 ) -> ProblemData:
     """Build a canonical CHEMIST-integral problem from a PySCF SCF calculation."""
-    mol = gto.M(atom=atom, basis=basis, charge=charge, spin=spin)
+    mol = gto.M(atom=atom, basis=basis, charge=charge, spin=spin, ecp=ecp)
     mf = scf.RHF(mol)
     mf.kernel()
 
